@@ -10,16 +10,22 @@ import kafka.consumer.Whitelist;
 import kafka.consumer.Blacklist;
 import kafka.javaapi.consumer.ConsumerConnector;
 import kafka.utils.ZkUtils;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.common.errors.WakeupException;
 
 import org.komamitsu.fluency.Fluency;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class GroupConsumer {
     private static final Logger LOG = LoggerFactory.getLogger(GroupConsumer.class);
@@ -29,10 +35,13 @@ public class GroupConsumer {
     private final PropertyConfig config;
     private ExecutorService executor;
     private final Fluency fluentLogger;
+    private final KafkaConsumer newConsumer;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public GroupConsumer(PropertyConfig config) throws IOException {
         this.config = config;
         this.consumer = kafka.consumer.Consumer.createJavaConsumerConnector(new ConsumerConfig(config.getProperties()));
+        this.newConsumer = new KafkaConsumer<String, String>(config.getProperties());
         this.topic = config.get(PropertyConfig.Constants.FLUENTD_CONSUMER_TOPICS.key);
         this.fluentLogger = setupFluentdLogger();
 
@@ -44,7 +53,7 @@ public class GroupConsumer {
     public Fluency setupFluentdLogger() throws IOException {
         return Fluency.defaultFluency(config.getFluentdConnect());
     }
- 
+
     public void shutdown() {
         LOG.info("Shutting down consumers");
 
@@ -66,7 +75,28 @@ public class GroupConsumer {
             LOG.error("failed to close fluentd logger completely", e);
         }
    }
- 
+
+    public void newConsumerRun() {
+        try {
+             newConsumer.subscribe(Arrays.asList(topic));
+             while (!closed.get()) {
+                 ConsumerRecords<String, String> records = newConsumer.poll(10000);
+                 // commit via Fluentd handler
+             }
+         } catch (WakeupException e) {
+             // Ignore exception if closing
+             if (!closed.get()) throw e;
+         } finally {
+             newConsumer.close();
+         }
+    }
+
+    // Shutdown hook which can be called from a separate thread
+    public void newConsumerShutdown() {
+        closed.set(true);
+        newConsumer.wakeup();
+    }
+
     public void run() {
         int numThreads = config.getInt(PropertyConfig.Constants.FLUENTD_CONSUMER_THREADS.key);
         List<KafkaStream<byte[], byte[]>> streams = setupKafkaStream(numThreads);
@@ -96,7 +126,7 @@ public class GroupConsumer {
 
         return consumer.createMessageStreamsByFilter(topicFilter, numThreads);
     }
- 
+
     public static void main(String[] args) throws IOException {
         final PropertyConfig pc = new PropertyConfig(args[0]);
         final GroupConsumer gc = new GroupConsumer(pc);

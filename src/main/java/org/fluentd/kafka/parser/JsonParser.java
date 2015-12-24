@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.io.IOException;
 
 import kafka.message.MessageAndMetadata;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -25,6 +26,15 @@ public class JsonParser extends MessageParser {
     public Map<String, Object> parse(MessageAndMetadata<byte[], byte[]> entry) throws Exception {
         try {
             return mapper.readValue(new String(entry.message()), typeRef);
+        } catch (IOException e) {
+            throw new RuntimeException(e); // Avoid IOException conflict with fluency logger
+        }
+    }
+
+    @Override
+    public Map<String, Object> parse(ConsumerRecord<String, String> record) throws Exception {
+        try {
+            return mapper.readValue(record.value(), typeRef);
         } catch (IOException e) {
             throw new RuntimeException(e); // Avoid IOException conflict with fluency logger
         }
