@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class GroupConsumer {
     private static final Logger LOG = LoggerFactory.getLogger(GroupConsumer.class);
 
-    private final String topic;
+    private final String topicProp;
     private final PropertyConfig config;
     private ExecutorService executor;
     private final Fluency fluentLogger;
@@ -34,7 +34,7 @@ public class GroupConsumer {
     public GroupConsumer(PropertyConfig config) throws IOException {
         this.config = config;
         this.consumer = new KafkaConsumer<String, String>(config.getProperties());
-        this.topic = config.get(PropertyConfig.Constants.FLUENTD_CONSUMER_TOPICS.key);
+        this.topicProp = config.get(PropertyConfig.Constants.FLUENTD_CONSUMER_TOPICS.key);
         this.fluentLogger = setupFluentdLogger();
 
         // for testing. Don't use on production
@@ -73,7 +73,7 @@ public class GroupConsumer {
 
     public void run() {
         try {
-            String[] topics = topic.split(",");
+            String[] topics = topicProp.split(",");
             consumer.subscribe(Arrays.asList(topics));
             int numThreads = config.getInt(PropertyConfig.Constants.FLUENTD_CONSUMER_THREADS.key);
             executor = Executors.newFixedThreadPool(numThreads);
