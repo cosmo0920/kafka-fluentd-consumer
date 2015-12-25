@@ -4,7 +4,6 @@ import java.util.Map;
 import java.util.HashMap;
 import java.io.IOException;
 
-import kafka.message.MessageAndMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import com.fasterxml.jackson.core.JsonFactory;
@@ -20,15 +19,6 @@ public class JsonParser extends MessageParser {
 
     public JsonParser(PropertyConfig config) {
         super(config);
-    }
-
-    @Override
-    public Map<String, Object> parse(MessageAndMetadata<byte[], byte[]> entry) throws Exception {
-        try {
-            return mapper.readValue(new String(entry.message()), typeRef);
-        } catch (IOException e) {
-            throw new RuntimeException(e); // Avoid IOException conflict with fluency logger
-        }
     }
 
     @Override

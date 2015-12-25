@@ -2,7 +2,6 @@ package org.fluentd.kafka.parser;
 
 import java.util.Map;
 
-import kafka.message.MessageAndMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import org.fluentd.kafka.PropertyConfig;
@@ -13,8 +12,6 @@ public abstract class MessageParser {
     public MessageParser(PropertyConfig config) {
         this.config = config;
     }
-
-    public abstract Map<String, Object> parse(MessageAndMetadata<byte[], byte[]> entry) throws Exception;
 
     public abstract Map<String, Object> parse(ConsumerRecord<String, String> entry) throws Exception;
 }

@@ -4,7 +4,6 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Iterator;
 
-import kafka.message.MessageAndMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import org.jcodings.specific.UTF8Encoding;
@@ -26,30 +25,6 @@ public class RegexpParser extends MessageParser {
         byte[] pattern = config.get("fluentd.record.pattern").getBytes();
         regex = new Regex(pattern, 0, pattern.length, Option.DEFAULT, UTF8Encoding.INSTANCE);
         entries = setupNamedGroupEntries();
-    }
-
-    @Override
-    public Map<String, Object> parse(MessageAndMetadata<byte[], byte[]> entry) throws Exception {
-        HashMap<String, Object> data = new HashMap<String, Object>();
-        byte[] rawMessage = entry.message();
-        Matcher matcher = regex.matcher(rawMessage);
-
-        int result = matcher.search(0, rawMessage.length, Option.DEFAULT);
-        if (result != -1) {
-            Region region = matcher.getEagerRegion();
-            for (NamedGroupEntry e : entries) {
-                int index = e.index;
-                if (region.beg[index] == -1)
-                    continue;
-
-                String value = new String(rawMessage, region.beg[index], region.end[index] - region.beg[index]);
-                data.put(e.name, value);
-            }
-        } else {
-            throw new RuntimeException("message has wrong format: message = " + new String(rawMessage));
-        }
-
-        return data;
     }
 
     @Override

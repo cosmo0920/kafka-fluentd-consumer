@@ -3,12 +3,6 @@ package org.fluentd.kafka;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import kafka.consumer.ConsumerConfig;
-import kafka.consumer.KafkaStream;
-import kafka.consumer.TopicFilter;
-import kafka.consumer.Whitelist;
-import kafka.consumer.Blacklist;
-import kafka.javaapi.consumer.ConsumerConnector;
 import kafka.utils.ZkUtils;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -30,18 +24,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class GroupConsumer {
     private static final Logger LOG = LoggerFactory.getLogger(GroupConsumer.class);
 
-    private final ConsumerConnector consumer;
     private final String topic;
     private final PropertyConfig config;
     private ExecutorService executor;
     private final Fluency fluentLogger;
-    private final KafkaConsumer newConsumer;
+    private final KafkaConsumer consumer;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public GroupConsumer(PropertyConfig config) throws IOException {
         this.config = config;
-        this.consumer = kafka.consumer.Consumer.createJavaConsumerConnector(new ConsumerConfig(config.getProperties()));
-        this.newConsumer = new KafkaConsumer<String, String>(config.getProperties());
+        this.consumer = new KafkaConsumer<String, String>(config.getProperties());
         this.topic = config.get(PropertyConfig.Constants.FLUENTD_CONSUMER_TOPICS.key);
         this.fluentLogger = setupFluentdLogger();
 
@@ -57,7 +49,10 @@ public class GroupConsumer {
     public void shutdown() {
         LOG.info("Shutting down consumers");
 
-        if (consumer != null) consumer.shutdown();
+        if (consumer != null) {
+            closed.set(true);
+            consumer.wakeup();
+        }
         if (executor != null) executor.shutdown();
         try {
             if (!executor.awaitTermination(5000, TimeUnit.MILLISECONDS)) {
@@ -74,57 +69,23 @@ public class GroupConsumer {
         } catch (IOException e) {
             LOG.error("failed to close fluentd logger completely", e);
         }
-   }
-
-    public void newConsumerRun() {
-        try {
-             newConsumer.subscribe(Arrays.asList(topic));
-             while (!closed.get()) {
-                 ConsumerRecords<String, String> records = newConsumer.poll(10000);
-                 // commit via Fluentd handler
-             }
-         } catch (WakeupException e) {
-             // Ignore exception if closing
-             if (!closed.get()) throw e;
-         } finally {
-             newConsumer.close();
-         }
-    }
-
-    // Shutdown hook which can be called from a separate thread
-    public void newConsumerShutdown() {
-        closed.set(true);
-        newConsumer.wakeup();
     }
 
     public void run() {
-        int numThreads = config.getInt(PropertyConfig.Constants.FLUENTD_CONSUMER_THREADS.key);
-        List<KafkaStream<byte[], byte[]>> streams = setupKafkaStream(numThreads);
-
-        // now create an object to consume the messages
-        executor = Executors.newFixedThreadPool(numThreads);
-        for (final KafkaStream stream : streams) {
-            executor.submit(new FluentdHandler(stream, config, fluentLogger));
+        try {
+            String[] topics = topic.split(",");
+            consumer.subscribe(Arrays.asList(topics));
+            int numThreads = config.getInt(PropertyConfig.Constants.FLUENTD_CONSUMER_THREADS.key);
+            executor = Executors.newFixedThreadPool(numThreads);
+            while (!closed.get()) {
+                ConsumerRecords<String, String> records = consumer.poll(10000);
+                executor.submit(new FluentdHandler(records, config, fluentLogger));
+            }
+        } catch (WakeupException e) {
+            if (!closed.get()) throw e;
+        } finally {
+            consumer.close();
         }
-    }
-
-    public List<KafkaStream<byte[], byte[]>> setupKafkaStream(int numThreads) {
-        String topics = config.get(PropertyConfig.Constants.FLUENTD_CONSUMER_TOPICS.key);
-        String topicsPattern = config.get(PropertyConfig.Constants.FLUENTD_CONSUMER_TOPICS_PATTERN.key, "whitelist");
-        TopicFilter topicFilter;
-
-        switch (topicsPattern) {
-        case "whitelist":
-            topicFilter = new Whitelist(topics);
-            break;
-        case "blacklist":
-            topicFilter = new Blacklist(topics);
-            break;
-        default:
-            throw new RuntimeException("'" + topicsPattern + "' topics pattern is not supported");
-        }
-
-        return consumer.createMessageStreamsByFilter(topicFilter, numThreads);
     }
 
     public static void main(String[] args) throws IOException {
