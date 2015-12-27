@@ -7,15 +7,19 @@ import kafka.utils.ZkUtils;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.TopicPartition;
 
 import org.komamitsu.fluency.Fluency;
 
 import java.io.IOException;
 import java.net.URI;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Properties;
+import java.util.regex.Pattern;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -73,8 +77,7 @@ public class GroupConsumer {
 
     public void run() {
         try {
-            String[] topics = topicProp.split(",");
-            consumer.subscribe(Arrays.asList(topics));
+            setupKafkaConsumer();
             int numThreads = config.getInt(PropertyConfig.Constants.FLUENTD_CONSUMER_THREADS.key);
             executor = Executors.newFixedThreadPool(numThreads);
             while (!closed.get()) {
@@ -85,6 +88,25 @@ public class GroupConsumer {
             if (!closed.get()) throw e;
         } finally {
             consumer.close();
+        }
+    }
+
+    public void setupKafkaConsumer() {
+        Pattern pattern = Pattern.compile(topicProp);
+        consumer.subscribe(pattern, new NoOpConsumerListener(consumer));
+    }
+
+    private class NoOpConsumerListener implements ConsumerRebalanceListener {
+        private KafkaConsumer<?,?> consumer;
+
+        public NoOpConsumerListener(KafkaConsumer<?,?> consumer) {
+            this.consumer = consumer;
+        }
+
+        public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+        }
+
+        public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
         }
     }
 
