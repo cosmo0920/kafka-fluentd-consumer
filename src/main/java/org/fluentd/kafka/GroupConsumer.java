@@ -20,7 +20,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Properties;
 import java.util.regex.Pattern;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,12 +34,12 @@ public class GroupConsumer {
     private final PropertyConfig config;
     private ExecutorService executor;
     private final Fluency fluentLogger;
-    private final KafkaConsumer consumer;
+    private final KafkaConsumerTask consumer;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public GroupConsumer(PropertyConfig config) throws IOException {
         this.config = config;
-        this.consumer = new KafkaConsumer<String, String>(config.getProperties());
+        this.consumer = new KafkaConsumerTask(config);
         this.topicProp = config.get(PropertyConfig.Constants.FLUENTD_CONSUMER_TOPICS.key);
         this.fluentLogger = setupFluentdLogger();
 
@@ -55,7 +57,7 @@ public class GroupConsumer {
 
         if (consumer != null) {
             closed.set(true);
-            consumer.wakeup();
+            consumer.shutdown();
         }
         if (executor != null) executor.shutdown();
         try {
@@ -77,36 +79,23 @@ public class GroupConsumer {
 
     public void run() {
         try {
-            setupKafkaConsumer();
             int numThreads = config.getInt(PropertyConfig.Constants.FLUENTD_CONSUMER_THREADS.key);
             executor = Executors.newFixedThreadPool(numThreads);
             while (!closed.get()) {
-                ConsumerRecords<String, String> records = consumer.poll(10000);
-                executor.submit(new FluentdHandler(records, config, fluentLogger));
+                try {
+                    Future<ConsumerRecords<String, String>> future = executor.submit(consumer);
+                    ConsumerRecords<String, String> records = future.get();
+                    executor.submit(new FluentdHandler(records, config, fluentLogger));
+                } catch (InterruptedException e) {
+                    LOG.error("Interrupted during consuming");
+                } catch (ExecutionException e){
+                    LOG.error("Got exception during executing " + e.getCause());
+                }
             }
         } catch (WakeupException e) {
             if (!closed.get()) throw e;
         } finally {
-            consumer.close();
-        }
-    }
-
-    public void setupKafkaConsumer() {
-        Pattern pattern = Pattern.compile(topicProp);
-        consumer.subscribe(pattern, new NoOpConsumerListener(consumer));
-    }
-
-    private class NoOpConsumerListener implements ConsumerRebalanceListener {
-        private KafkaConsumer<?,?> consumer;
-
-        public NoOpConsumerListener(KafkaConsumer<?,?> consumer) {
-            this.consumer = consumer;
-        }
-
-        public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-        }
-
-        public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+            consumer.shutdown();
         }
     }
 
